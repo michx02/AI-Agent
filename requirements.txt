@@ -1,0 +1,7 @@
+#installing discord.py
+discord.py
+
+#for GEMINI API
+google
+
+google-genai
