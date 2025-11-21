@@ -5,7 +5,15 @@
 import os, time, sqlite3, threading
 from google import genai
 from typing import Dict, Any
-from DONT_COMMIT_apis import YOUR_API_KEY
+from dotenv import load_dotenv  # pip install python-dotenv
+import os
+
+
+load_dotenv()  # reads .env in project root
+
+YOUR_API_KEY = os.getenv("YOUR_API_KEY")
+if not YOUR_API_KEY:
+    raise RuntimeError("Missing MY_API_KEY")
 
 DB_PATH = os.environ.get("BOT_MEMORY_DB", "memory.sqlite3")
 
@@ -35,7 +43,7 @@ class Memory:
             CREATE TABLE IF NOT EXISTS turns (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 thread_key TEXT NOT NULL,
-                role       TEXT NOT NULL,      -- 'user' | 'assistant' | 'system'
+                role       TEXT NOT NULL,
                 text       TEXT NOT NULL,
                 ts         REAL NOT NULL,
                 FOREIGN KEY(thread_key) REFERENCES threads(thread_key)
@@ -54,6 +62,19 @@ class Memory:
             CREATE INDEX IF NOT EXISTS profiles_user_idx
             ON profiles(user_id, ts DESC)
             """)
+            # ---- NEW: team facts (guild-scoped) ----
+            self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS team_facts (
+                guild_id TEXT NOT NULL,
+                fact     TEXT NOT NULL,
+                ts       REAL NOT NULL
+            )
+            """)
+            self._conn.execute("""
+            CREATE INDEX IF NOT EXISTS team_facts_guild_idx
+            ON team_facts(guild_id, ts DESC)
+            """)
+
 
     # ---------- keying strategy ----------
     def _key(self, message) -> str:
@@ -199,6 +220,31 @@ class Memory:
                 (str(user_id),)
             ).fetchall()
         return [r[0] for r in rows]
+    
+    def add_team_fact(self, guild_id: int, fact: str, cap: int = 300):
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO team_facts(guild_id, fact, ts) VALUES(?, ?, ?)",
+                (str(guild_id), fact.strip(), time.time())
+            )
+            # cap per guild to avoid unbounded growth
+            rows = self._conn.execute(
+                "SELECT rowid FROM team_facts WHERE guild_id=? ORDER BY ts DESC",
+                (str(guild_id),)
+            ).fetchall()
+            if len(rows) > cap:
+                to_delete = [r[0] for r in rows[cap:]]
+                qmarks = ",".join("?" * len(to_delete))
+                self._conn.execute(f"DELETE FROM team_facts WHERE rowid IN ({qmarks})", to_delete)
+
+    def get_team_facts(self, guild_id: int, limit: int = 50):
+        with self._lock, self._conn:
+            rows = self._conn.execute(
+                "SELECT fact FROM team_facts WHERE guild_id=? ORDER BY ts DESC LIMIT ?",
+                (str(guild_id), limit)
+            ).fetchall()
+        return [r[0] for r in rows]
+
 
 
 
