@@ -1,1 +1,16 @@
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+env/
+venv/
+
+# Environment variables
 .env
+
+# SQLite databases
+memory.sqlite3
+discord_logs.db
