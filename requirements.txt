@@ -1,7 +1,8 @@
-#installing discord.py
+# Core Discord bot
 discord.py
 
-#for GEMINI API
-google
-
+# Google Gemini client
 google-genai
+
+# Env var loading
+python-dotenv
