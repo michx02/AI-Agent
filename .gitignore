@@ -14,3 +14,8 @@ venv/
 # SQLite databases
 memory.sqlite3
 discord_logs.db
+discord_logs.sqlite3
+memory.sqlite3-shm
+memory.sqlite3-wal
+
+
