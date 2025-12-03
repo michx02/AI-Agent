@@ -6,3 +6,7 @@ google-genai
 
 # Env var loading
 python-dotenv
+
+#for postgresql
+psycopg2-binary
+
