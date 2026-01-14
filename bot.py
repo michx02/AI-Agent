@@ -131,8 +131,24 @@ async def safe_send(channel, text: str):
 # Optional: let users store long-term facts
 @bot.command(name="remember")
 async def remember(ctx, *, fact: str):
-    memory.add_fact(ctx.author.id, fact)
-    await ctx.reply("Noted. I’ll remember that.")
+    cleaned = fact.strip()
+    if not cleaned:
+        await ctx.reply("Please provide a fact to remember.")
+        return
+    memory.add_fact(ctx.author.id, cleaned)
+    await ctx.reply("Noted. I'll remember that.")
+
+@bot.command(name="remember_team")
+async def remember_team(ctx, *, fact: str):
+    if not ctx.guild:
+        await ctx.reply("Team facts can only be saved in a server.")
+        return
+    cleaned = fact.strip()
+    if not cleaned:
+        await ctx.reply("Please provide a team fact to remember.")
+        return
+    memory.add_team_fact(ctx.guild.id, cleaned)
+    await ctx.reply("Got it. I'll remember this for the team.")
 
 @bot.event
 async def on_ready():
@@ -143,6 +159,16 @@ async def on_message(message: discord.Message):
     log_message(message)
     if message.author == bot.user:
         return
+    try:
+        if not message.author.bot:
+            memory.record_message_for_facts(
+                message.author.id,
+                message.guild.id if message.guild else None,
+                message.content,
+                batch_size=30,
+            )
+    except Exception:
+        pass
 
     if bot.user in message.mentions:
         key = await conversation_key(message)

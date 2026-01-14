@@ -2,6 +2,7 @@ from dotenv import load_dotenv  # pip install python-dotenv
 import os
 import time
 import threading
+import json
 from typing import Dict, Any, List
 
 from google import genai
@@ -22,6 +23,8 @@ class Memory:
     def __init__(self, max_chars: int = 6000):
         self.max_chars = max_chars
         self._lock = threading.RLock()
+        self._user_fact_buffers: Dict[str, List[str]] = {}
+        self._guild_fact_buffers: Dict[str, List[str]] = {}
         self._init_schema()
 
     # ---------- schema ----------
@@ -266,6 +269,76 @@ class Memory:
                 rows = cur.fetchall()
         return [r["fact"] for r in rows]
 
+    # ---------- auto-fact extraction ----------
+    def update_facts_from_text(self, user_id: int, guild_id: int | None, text: str):
+        facts = extract_facts(text)
+        if not facts:
+            return
+        for item in facts:
+            fact_type = item.get("type")
+            fact_text = (item.get("fact") or "").strip()
+            if not fact_text:
+                continue
+            if fact_type == "team" and guild_id:
+                self._add_team_fact_unique(guild_id, fact_text)
+            elif fact_type == "user":
+                self._add_fact_unique(user_id, fact_text)
+
+    def record_message_for_facts(self, user_id: int, guild_id: int | None, text: str, batch_size: int = 30):
+        cleaned = (text or "").strip()
+        if not cleaned:
+            return
+
+        user_key = str(user_id)
+        user_buf = self._user_fact_buffers.setdefault(user_key, [])
+        user_buf.append(cleaned)
+        if len(user_buf) >= batch_size:
+            batch_text = "\n".join(user_buf[-batch_size:])
+            facts = extract_facts(batch_text)
+            for item in facts:
+                if item.get("type") == "user":
+                    fact_text = (item.get("fact") or "").strip()
+                    if fact_text:
+                        self._add_fact_unique(user_id, fact_text)
+            self._user_fact_buffers[user_key] = []
+
+        if guild_id is None:
+            return
+        guild_key = str(guild_id)
+        guild_buf = self._guild_fact_buffers.setdefault(guild_key, [])
+        guild_buf.append(cleaned)
+        if len(guild_buf) >= batch_size:
+            batch_text = "\n".join(guild_buf[-batch_size:])
+            facts = extract_facts(batch_text)
+            for item in facts:
+                if item.get("type") == "team":
+                    fact_text = (item.get("fact") or "").strip()
+                    if fact_text:
+                        self._add_team_fact_unique(guild_id, fact_text)
+            self._guild_fact_buffers[guild_key] = []
+
+    def _add_fact_unique(self, user_id: int, fact: str, cap: int = 100):
+        with self._lock, get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM profiles WHERE user_id=%s AND fact=%s LIMIT 1",
+                    (str(user_id), fact),
+                )
+                if cur.fetchone():
+                    return
+        self.add_fact(user_id, fact, cap=cap)
+
+    def _add_team_fact_unique(self, guild_id: int, fact: str, cap: int = 300):
+        with self._lock, get_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT 1 FROM team_facts WHERE guild_id=%s AND fact=%s LIMIT 1",
+                    (str(guild_id), fact),
+                )
+                if cur.fetchone():
+                    return
+        self.add_team_fact(guild_id, fact, cap=cap)
+
 
 def summarize(text: str, limit=800):
     resp = client.models.generate_content(
@@ -277,3 +350,37 @@ def summarize(text: str, limit=800):
         ),
     )
     return (resp.text or "")[:limit]
+
+
+def extract_facts(text: str) -> List[dict]:
+    prompt = (
+        "Extract durable facts and preferences from the text. "
+        "Return a JSON array of objects with fields: "
+        '{"type":"user|team","fact":"..."}.\n'
+        "Rules: Only include facts likely to remain true or useful; "
+        "avoid temporary details, dates, or one-off messages. "
+        "Prefer short sentences. If no facts, return [].\n\n"
+        f"Text:\n{text}\n"
+    )
+    resp = client.models.generate_content(
+        model=MODEL,
+        contents=prompt,
+    )
+    raw = (resp.text or "").strip()
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Try to salvage a JSON array if the model wrapped it in text.
+        start = raw.find("[")
+        end = raw.rfind("]")
+        if start == -1 or end == -1 or end < start:
+            return []
+        try:
+            data = json.loads(raw[start : end + 1])
+        except json.JSONDecodeError:
+            return []
+    if isinstance(data, list):
+        return [x for x in data if isinstance(x, dict)]
+    return []
