@@ -4,6 +4,7 @@ from discord import File, Embed
 from discord.ext import commands
 from google import genai
 from google.genai import types
+from openai import OpenAI
 from dotenv import load_dotenv  # pip install python-dotenv
 import os
 
@@ -17,9 +18,11 @@ import logger #part of local py files
 
 load_dotenv()  # reads .env in project root
 
-YOUR_API_KEY = os.getenv("YOUR_API_KEY")
-if not YOUR_API_KEY:
-    raise RuntimeError("Missing MY_API_KEY")
+GEMINI_API_KEY = os.getenv("YOUR_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
+if not GEMINI_API_KEY and not OPENAI_API_KEY:
+    raise RuntimeError("Missing AI API keys. Set YOUR_API_KEY, OPENAI_API_KEY, or both.")
 
 
 
@@ -36,18 +39,50 @@ memory = Memory(max_chars=6000)  # uses PostgreSQL for AI interactions
 
 
 
-client = genai.Client(api_key = YOUR_API_KEY)
-MODEL = "gemini-2.5-flash"
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+
+
+def generate_text(prompt: str, system_instruction: str | None = None) -> str:
+    if gemini_client:
+        try:
+            config = None
+            if system_instruction:
+                config = types.GenerateContentConfig(system_instruction=system_instruction)
+            resp = gemini_client.models.generate_content(
+                model=GEMINI_MODEL,
+                config=config,
+                contents=prompt,
+            )
+            text = resp.text or ""
+            if text:
+                return text
+        except Exception as gemini_error:
+            print(f"Gemini request failed, falling back to OpenAI: {gemini_error}")
+            if not openai_client:
+                raise
+
+    if not openai_client:
+        raise RuntimeError("No working AI provider is configured.")
+
+    response = openai_client.responses.create(
+        model=OPENAI_MODEL,
+        instructions=system_instruction,
+        input=prompt,
+    )
+    return response.output_text or "(no content)"
 
 def summarize(text: str, limit=800):
-    resp = client.models.generate_content(
-        model=MODEL,
-        contents=(
+    summary = generate_text(
+        prompt=(
             "Summarize the following conversation into compact notes "
             f"(<= {limit} characters). Keep user goals/preferences and unresolved tasks.\n\n{text}"
         )
     )
-    return (resp.text or "")[:limit]
+    return summary[:limit]
 
 # --- Conversation scoping helpers ---
 
@@ -117,12 +152,7 @@ def build_prompt(author_id: int, thread, guild, ambient_lines: list[str], target
 
 
 def get_response_from_ai(prompt: str) -> str:
-    resp = client.models.generate_content(
-        model=MODEL,
-        config=types.GenerateContentConfig(system_instruction="Limit response 2000 chars"),
-        contents=prompt
-    )
-    return resp.text or "(no content)"
+    return generate_text(prompt, system_instruction="Limit response 2000 chars") or "(no content)"
 
 async def safe_send(channel, text: str):
     for chunk in wrap(text, 2000, replace_whitespace=False, drop_whitespace=False):

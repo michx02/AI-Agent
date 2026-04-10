@@ -1,9 +1,10 @@
-# Multiconversational Discord AI Agent (Gemini + RAG-Style Memory)
+# Multiconversational Discord AI Agent (Gemini with OpenAI Fallback + RAG-Style Memory)
 
-A Discord AI agent that responds when mentioned, uses Google Gemini for natural language generation, and maintains long-term coherence using a lightweight, RAG-inspired memory system backed by PostgreSQL. The agent keeps track of threads, summaries, and recent context to support multi-conversation interactions across channels and threads.
+A Discord AI agent that responds when mentioned, uses Google Gemini for natural language generation, and automatically falls back to OpenAI if Gemini fails. It maintains long-term coherence using a lightweight, RAG-inspired memory system backed by PostgreSQL. The agent keeps track of threads, summaries, and recent context to support multi-conversation interactions across channels and threads.
 
 ## Features
-- Gemini-generated responses trimmed to Discord's 2,000-character limit  
+- Gemini-generated responses with automatic OpenAI fallback  
+- Responses trimmed to Discord's 2,000-character limit  
 - RAG-style memory pipeline with message logging, retrieval, and summarization  
 - Thread-aware and channel-aware context building  
 - Ambient context injection (recent messages, mention-based context, thread history)  
@@ -17,9 +18,13 @@ pip install -r requirements.txt
 2. Create a `.env` file  
 ```bash
 YOUR_API_KEY=<google-genai-api-key>
+OPENAI_API_KEY=<openai-api-key>
+OPENAI_MODEL=gpt-5-nano
+GEMINI_MODEL=gemini-2.5-flash
 YOUR_BOT_TOKEN=<discord-bot-token>
 DATABASE_URL=<postgres-connection-string>
 ```
+`YOUR_API_KEY` and `OPENAI_API_KEY` do not both need to be set, but at least one provider key is required. If both are set, the bot tries Gemini first and uses OpenAI as a fallback if Gemini fails.
 3. Run the bot  
 ```bash
 python main.py
@@ -38,7 +43,8 @@ The agent is built around three core components: the bot logic, the memory engin
 - Responds only when the bot is mentioned in a message  
 - Collects context (recent messages, reply relationships, stored summaries)  
 - Builds a structured prompt using RAG-style retrieval  
-- Sends the constructed prompt to Gemini (`gemini-2.5-flash`)  
+- Sends the constructed prompt to Gemini (`gemini-2.5-flash` by default)  
+- Falls back to OpenAI (`gpt-5-nano` by default) if Gemini errors out  
 - Returns a reply that fits Discord's 2,000-character limit  
 
 ### Memory System — `memory.py`
@@ -58,7 +64,7 @@ All persisted data lives in PostgreSQL, configured via `DATABASE_URL`. Tables ar
 ## Requirements
 - Python 3.10+  
 - Discord bot token (with Message Content intent enabled)  
-- Google GenAI API key  
+- Google GenAI API key and/or OpenAI API key  
 - PostgreSQL database URL  
 
 ## Notes

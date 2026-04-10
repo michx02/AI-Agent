@@ -4,9 +4,11 @@ discord.py
 # Google Gemini client
 google-genai
 
+# OpenAI client
+openai
+
 # Env var loading
 python-dotenv
 
 #for postgresql
 psycopg2-binary
-
