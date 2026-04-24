@@ -7,6 +7,7 @@ from google.genai import types
 from openai import OpenAI
 from dotenv import load_dotenv  # pip install python-dotenv
 import os
+from typing import Any
 
 from memory import Memory
 from textwrap import wrap
@@ -44,10 +45,48 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
+OPENAI_MCP_POSTGRES_SERVER_URL = os.getenv("OPENAI_MCP_POSTGRES_SERVER_URL")
+OPENAI_MCP_POSTGRES_LABEL = os.getenv("OPENAI_MCP_POSTGRES_LABEL", "postgres")
+OPENAI_MCP_POSTGRES_DESCRIPTION = os.getenv(
+    "OPENAI_MCP_POSTGRES_DESCRIPTION",
+    "PostgreSQL database tools for querying structured application data.",
+)
+OPENAI_MCP_POSTGRES_AUTH = os.getenv("OPENAI_MCP_POSTGRES_AUTH")
+OPENAI_MCP_POSTGRES_REQUIRE_APPROVAL = os.getenv(
+    "OPENAI_MCP_POSTGRES_REQUIRE_APPROVAL",
+    "never",
+)
+OPENAI_MCP_POSTGRES_ALLOWED_TOOLS = [
+    tool.strip()
+    for tool in os.getenv("OPENAI_MCP_POSTGRES_ALLOWED_TOOLS", "").split(",")
+    if tool.strip()
+]
+
+
+def build_openai_tools() -> list[dict[str, Any]]:
+    if not OPENAI_MCP_POSTGRES_SERVER_URL:
+        return []
+
+    tool: dict[str, Any] = {
+        "type": "mcp",
+        "server_label": OPENAI_MCP_POSTGRES_LABEL,
+        "server_description": OPENAI_MCP_POSTGRES_DESCRIPTION,
+        "server_url": OPENAI_MCP_POSTGRES_SERVER_URL,
+        "require_approval": OPENAI_MCP_POSTGRES_REQUIRE_APPROVAL,
+    }
+    if OPENAI_MCP_POSTGRES_AUTH:
+        tool["authorization"] = OPENAI_MCP_POSTGRES_AUTH
+    if OPENAI_MCP_POSTGRES_ALLOWED_TOOLS:
+        tool["allowed_tools"] = OPENAI_MCP_POSTGRES_ALLOWED_TOOLS
+    return [tool]
+
+
+def should_prefer_openai() -> bool:
+    return bool(openai_client and build_openai_tools())
 
 
 def generate_text(prompt: str, system_instruction: str | None = None) -> str:
-    if gemini_client:
+    if gemini_client and not should_prefer_openai():
         try:
             config = None
             if system_instruction:
@@ -72,6 +111,7 @@ def generate_text(prompt: str, system_instruction: str | None = None) -> str:
         model=OPENAI_MODEL,
         instructions=system_instruction,
         input=prompt,
+        tools=build_openai_tools() or None,
     )
     return response.output_text or "(no content)"
 
@@ -130,7 +170,12 @@ def build_prompt(author_id: int, thread, guild, ambient_lines: list[str], target
     recent_turns = "\n".join(f"{t['role'].capitalize()}: {t['text']}" for t in thread["turns"])
     ambient = "\n".join(ambient_lines)
 
-    preface = "You are a helpful Discord assistant. Be concise. Ask Follow up question when necessary only!\n\n"
+    preface = (
+        "You are a helpful Discord assistant. Be concise. "
+        "Ask follow-up questions only when necessary.\n"
+        "If database MCP tools are available, use them when the user asks for factual data "
+        "that should come from PostgreSQL instead of guessing.\n\n"
+    )
     blocks = []
     if team_facts:
         blocks.append("Team knowledge (shared):\n- " + "\n- ".join(team_facts))

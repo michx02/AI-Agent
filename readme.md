@@ -9,6 +9,7 @@ A Discord AI agent that responds when mentioned, uses Google Gemini for natural 
 - Thread-aware and channel-aware context building  
 - Ambient context injection (recent messages, mention-based context, thread history)  
 - PostgreSQL-backed storage (see `DATABASE_URL`), auto-created on first run  
+- Optional OpenAI MCP connection to a remote PostgreSQL MCP server for live DB-backed answers  
 
 ## Quickstart
 1. Install dependencies  
@@ -23,8 +24,15 @@ OPENAI_MODEL=gpt-5-nano
 GEMINI_MODEL=gemini-2.5-flash
 YOUR_BOT_TOKEN=<discord-bot-token>
 DATABASE_URL=<postgres-connection-string>
+OPENAI_MCP_POSTGRES_SERVER_URL=<remote-postgres-mcp-url>
+OPENAI_MCP_POSTGRES_AUTH=<optional-auth-header-value>
+OPENAI_MCP_POSTGRES_LABEL=postgres
+OPENAI_MCP_POSTGRES_DESCRIPTION="PostgreSQL database tools for querying structured application data."
+OPENAI_MCP_POSTGRES_REQUIRE_APPROVAL=never
+OPENAI_MCP_POSTGRES_ALLOWED_TOOLS=<optional-comma-separated-tool-names>
 ```
 `YOUR_API_KEY` and `OPENAI_API_KEY` do not both need to be set, but at least one provider key is required. If both are set, the bot tries Gemini first and uses OpenAI as a fallback if Gemini fails.
+If `OPENAI_MCP_POSTGRES_SERVER_URL` is set, the bot prefers OpenAI for generation so the MCP tools can be used during replies.
 3. Run the bot  
 ```bash
 python main.py
@@ -45,6 +53,7 @@ The agent is built around three core components: the bot logic, the memory engin
 - Builds a structured prompt using RAG-style retrieval  
 - Sends the constructed prompt to Gemini (`gemini-2.5-flash` by default)  
 - Falls back to OpenAI (`gpt-5-nano` by default) if Gemini errors out  
+- If a PostgreSQL MCP server is configured, attaches it to OpenAI Responses API calls as an MCP tool  
 - Returns a reply that fits Discord's 2,000-character limit  
 
 ### Memory System — `memory.py`
@@ -71,3 +80,4 @@ All persisted data lives in PostgreSQL, configured via `DATABASE_URL`. Tables ar
 - The bot only responds when mentioned.  
 - Summaries keep the memory database small while preserving coherence.  
 - Designed to support multi-conversation interactions across threads, channels, and servers.  
+- For unattended bot usage, `OPENAI_MCP_POSTGRES_REQUIRE_APPROVAL=never` is the practical default because no approval loop is implemented in this project. Only use trusted MCP servers.
