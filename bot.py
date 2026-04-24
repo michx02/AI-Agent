@@ -102,7 +102,7 @@ def generate_text(prompt: str, system_instruction: str | None = None) -> str:
         except Exception as gemini_error:
             print(f"Gemini request failed, falling back to OpenAI: {gemini_error}")
             if not openai_client:
-                raise
+                raise RuntimeError(f"Gemini failed and OpenAI is not configured: {gemini_error}")
 
     if not openai_client:
         raise RuntimeError("No working AI provider is configured.")
