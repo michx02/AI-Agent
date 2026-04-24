@@ -2,8 +2,6 @@ import io
 import discord
 from discord import File, Embed
 from discord.ext import commands
-from google import genai
-from google.genai import types
 from openai import OpenAI
 from dotenv import load_dotenv  # pip install python-dotenv
 import os
@@ -19,11 +17,10 @@ import logger #part of local py files
 
 load_dotenv()  # reads .env in project root
 
-GEMINI_API_KEY = os.getenv("YOUR_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-if not GEMINI_API_KEY and not OPENAI_API_KEY:
-    raise RuntimeError("Missing AI API keys. Set YOUR_API_KEY, OPENAI_API_KEY, or both.")
+if not OPENAI_API_KEY:
+    raise RuntimeError("Missing OpenAI API key. Set OPENAI_API_KEY.")
 
 
 
@@ -37,13 +34,8 @@ intents.guilds = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 memory = Memory(max_chars=6000)  # uses PostgreSQL for AI interactions
 
+openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-
-
-gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
-openai_client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
-
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5-nano")
 OPENAI_MCP_POSTGRES_SERVER_URL = os.getenv("OPENAI_MCP_POSTGRES_SERVER_URL")
 OPENAI_MCP_POSTGRES_LABEL = os.getenv("OPENAI_MCP_POSTGRES_LABEL", "postgres")
@@ -81,32 +73,7 @@ def build_openai_tools() -> list[dict[str, Any]]:
     return [tool]
 
 
-def should_prefer_openai() -> bool:
-    return bool(openai_client and build_openai_tools())
-
-
 def generate_text(prompt: str, system_instruction: str | None = None) -> str:
-    if gemini_client and not should_prefer_openai():
-        try:
-            config = None
-            if system_instruction:
-                config = types.GenerateContentConfig(system_instruction=system_instruction)
-            resp = gemini_client.models.generate_content(
-                model=GEMINI_MODEL,
-                config=config,
-                contents=prompt,
-            )
-            text = resp.text or ""
-            if text:
-                return text
-        except Exception as gemini_error:
-            print(f"Gemini request failed, falling back to OpenAI: {gemini_error}")
-            if not openai_client:
-                raise RuntimeError(f"Gemini failed and OpenAI is not configured: {gemini_error}")
-
-    if not openai_client:
-        raise RuntimeError("No working AI provider is configured.")
-
     response = openai_client.responses.create(
         model=OPENAI_MODEL,
         instructions=system_instruction,
